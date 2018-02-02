@@ -28,6 +28,7 @@ use OC;
 use OCA\Mail\Account;
 use OCA\Mail\Db\MailAccount;
 use OCA\Mail\Mailbox;
+use OCA\Mail\Service\Logger;
 use PHPUnit_Framework_TestCase;
 
 /**
@@ -60,7 +61,9 @@ abstract class AbstractTest extends PHPUnit_Framework_TestCase {
 		$a->setOutboundPassword($password);
 		$a->setOutboundSslMode('none');
 
-		self::$account = new Account($a);
+		self::$account = new Account($a, OC::$server->getCrypto(),
+			OC::$server->getConfig(), OC::$server->getMemCacheFactory(),
+			OC::$server->query(Logger::class), OC::$server->getL10N('mail'));
 		self::$account->getImapConnection();
 	}
 

@@ -18,39 +18,41 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>
  *
  */
+
 namespace OCA\Mail\Service\AutoConfig;
 
-use OCP\Security\ICrypto;
 use OCA\Mail\Account;
 use OCA\Mail\Db\MailAccount;
+use OCA\Mail\Service\AccountService;
 use OCA\Mail\Service\Logger;
+use OCP\Security\ICrypto;
 
 class ImapConnector {
 
-	/**
-	 * @var ICrypto
-	 */
+	/** @var ICrypto */
 	private $crypto;
 
-	/**
-	 * @var Logger
-	 */
+	/** @var Logger */
 	private $logger;
 
-	/**
-	 * @var string
-	 */
+	/** @var AccountService	 */
+	private $accountService;
+
+	/** @var string */
 	private $userId;
 
 	/**
 	 * @param ICrypto $crypto
 	 * @param Logger $logger
+	 * @param AccountService $accountService
 	 * @param string $UserId
 	 */
-	public function __construct(ICrypto $crypto, Logger $logger, $UserId) {
+	public function __construct(ICrypto $crypto, Logger $logger,
+		AccountService $accountService, $UserId) {
 		$this->crypto = $crypto;
 		$this->logger = $logger;
 		$this->userId = $UserId;
+		$this->accountService = $accountService;
 	}
 
 	/**
@@ -77,7 +79,7 @@ class ImapConnector {
 		$password = $this->crypto->encrypt($password);
 		$account->setInboundPassword($password);
 
-		$a = new Account($account);
+		$a = $this->accountService->newAccount($account);
 		$a->getImapConnection();
 		$this->logger->info("Test-Account-Successful: $this->userId, $host, $port, $user, $encryptionProtocol");
 		return $account;

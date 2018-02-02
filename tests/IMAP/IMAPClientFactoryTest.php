@@ -68,7 +68,9 @@ class IMAPClientFactoryTest extends TestCase {
 		$mailAccount->setInboundSslMode('ssl');
 		$mailAccount->setInboundUser('user@domain.tld');
 		$mailAccount->setInboundPassword(OC::$server->getCrypto()->encrypt('mypassword'));
-		return new Account($mailAccount);
+		return new Account($mailAccount, OC::$server->getCrypto(),
+			OC::$server->getConfig(), OC::$server->getMemCacheFactory(),
+			OC::$server->query(Logger::class), OC::$server->getL10N('mail'));
 	}
 
 	public function testGetClient() {

@@ -28,12 +28,33 @@ use OCA\Mail\Db\MailAccount;
 use OCA\Mail\Db\MailAccountMapper;
 use OCA\Mail\Exception\ServiceException;
 use OCA\Mail\Service\DefaultAccount\Manager;
+use OCP\ICacheFactory;
+use OCP\IConfig;
 use OCP\IL10N;
+use OCP\Security\ICrypto;
 
 class AccountService {
 
 	/** @var MailAccountMapper */
 	private $mapper;
+
+	/** @var IL10N */
+	private $l10n;
+
+	/** @var Manager */
+	private $defaultAccountManager;
+
+	/** @var Logger */
+	private $logger;
+
+	/** @var ICacheFactory */
+	private $cacheFactory;
+
+	/** @var ICrypto */
+	private $crypto;
+
+	/** @var IConfig */
+	private $config;
 
 	/**
 	 * Cache accounts for multiple calls to 'findByUserId'
@@ -42,21 +63,30 @@ class AccountService {
 	 */
 	private $accounts;
 
-	/** @var IL10N */
-	private $l10n;
-
-	/** @var Manager */
-	private $defaultAccountManager;
-
 	/**
 	 * @param MailAccountMapper $mapper
 	 * @param IL10N $l10n
+	 * @param Manager $defaultAccountManager
+	 * @param ICrypto $crypto
+	 * @param IConfig $config
+	 * @param ICacheFactory $cacheFactory
+	 * @param \OCA\Mail\Service\Logger $logger
 	 */
 	public function __construct(MailAccountMapper $mapper, IL10N $l10n,
-		Manager $defaultAccountManager) {
+		Manager $defaultAccountManager, ICrypto $crypto, IConfig $config,
+		ICacheFactory $cacheFactory, Logger $logger) {
 		$this->mapper = $mapper;
 		$this->l10n = $l10n;
 		$this->defaultAccountManager = $defaultAccountManager;
+		$this->crypto = $crypto;
+		$this->config = $config;
+		$this->cacheFactory = $cacheFactory;
+		$this->logger = $logger;
+	}
+
+	public function newAccount(MailAccount $mailAccount) {
+		return new Account($mailAccount, $this->crypto, $this->config,
+			$this->cacheFactory, $this->logger, $this->l10n);
 	}
 
 	/**
@@ -66,12 +96,12 @@ class AccountService {
 	public function findByUserId($currentUserId) {
 		if ($this->accounts === null) {
 			$accounts = array_map(function($a) {
-				return new Account($a);
+				return $this->newAccount($a);
 			}, $this->mapper->findByUserId($currentUserId));
 
 			$defaultAccount = $this->defaultAccountManager->getDefaultAccount();
 			if (!is_null($defaultAccount)) {
-				$accounts[] = new Account($defaultAccount);
+				$accounts[] = $this->newAccount($defaultAccount);
 			}
 
 			$this->accounts = $accounts;
@@ -100,14 +130,15 @@ class AccountService {
 			if (is_null($defaultAccount)) {
 				throw new Exception('Default account config missing');
 			}
-			return new Account($defaultAccount);
+			return $this->newAccount($defaultAccount);
 		}
-		return new Account($this->mapper->find($currentUserId, $accountId));
+		return $this->newAccount($this->mapper->find($currentUserId, $accountId));
 	}
 
 	private function moveMessageOnSameAccount(Account $account, $sourceFolderId,
 		$destFolderId, $messageId) {
-		$account->moveMessage(base64_decode($sourceFolderId), $messageId, base64_decode($destFolderId));
+		$account->moveMessage(base64_decode($sourceFolderId), $messageId,
+			base64_decode($destFolderId));
 	}
 
 	public function moveMessage($accountId, $folderId, $id, $destAccountId,

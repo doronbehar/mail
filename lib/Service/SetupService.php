@@ -76,7 +76,7 @@ class SetupService {
 
 		$this->accountService->save($mailAccount);
 
-		return new Account($mailAccount);
+		return $this->accountService->newAccount($mailAccount);
 	}
 
 	/**
@@ -115,7 +115,7 @@ class SetupService {
 		$newAccount->setInboundPassword($this->crypto->encrypt($newAccount->getInboundPassword()));
 		$newAccount->setOutboundPassword($this->crypto->encrypt($newAccount->getOutboundPassword()));
 
-		$account = new Account($newAccount);
+		$account = $this->accountService->newAccount($newAccount);
 		$this->logger->debug('Connecting to account {account}', ['account' => $newAccount->getEmail()]);
 		$transport = $this->smtpClientFactory->create($account);
 		$account->testConnectivity($transport);
@@ -123,7 +123,7 @@ class SetupService {
 		if ($newAccount) {
 			$this->accountService->save($newAccount);
 			$this->logger->debug("account created " . $newAccount->getId());
-			return new Account($newAccount);
+			return $this->accountService->newAccount($newAccount);
 		}
 
 			return null;

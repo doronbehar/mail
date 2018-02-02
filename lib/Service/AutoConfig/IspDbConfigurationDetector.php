@@ -29,12 +29,14 @@ use Horde_Mail_Exception;
 use Horde_Mail_Transport_Smtphorde;
 use OCA\Mail\Account;
 use OCA\Mail\Db\MailAccount;
+use OCA\Mail\Service\AccountService;
 use OCA\Mail\SMTP\SmtpClientFactory;
 use OCP\Security\ICrypto;
 use OpenCloud\Common\Log\Logger;
 
 class IspDbConfigurationDetector {
 
+	/** @var string */
 	private $UserId;
 
 	/** @var Logger */
@@ -55,6 +57,9 @@ class IspDbConfigurationDetector {
 	/** @var SmtpClientFactory */
 	private $smtpClientFactory;
 
+	/** @var AccountService */
+	private $accountService;
+
 	/**
 	 * @param Logger $logger
 	 * @param string $UserId
@@ -62,14 +67,18 @@ class IspDbConfigurationDetector {
 	 * @param IspDb $ispDb
 	 * @param ImapConnector $imapConnector
 	 * @param SmtpClientFactory $smtpClientFactory
+	 * @param AccountService $accountService
 	 */
-	public function __construct(Logger $logger, $UserId, ICrypto $crypto, IspDb $ispDb, ImapConnector $imapConnector, SmtpClientFactory $smtpClientFactory) {
+	public function __construct(Logger $logger, $UserId, ICrypto $crypto,
+		IspDb $ispDb, ImapConnector $imapConnector,
+		SmtpClientFactory $smtpClientFactory, AccountService $accountService) {
 		$this->logger = $logger;
 		$this->UserId = $UserId;
 		$this->ispDb = $ispDb;
 		$this->crypto = $crypto;
 		$this->imapConnector = $imapConnector;
 		$this->smtpClientFactory = $smtpClientFactory;
+		$this->accountService = $accountService;
 	}
 
 	/**
@@ -155,7 +164,8 @@ class IspDbConfigurationDetector {
 		}
 
 		try {
-			return $this->imapConnector->connect($email, $password, $name, $host, $port, $encryptionProtocol, $user);
+			return $this->imapConnector->connect($email, $password, $name, $host, $port,
+					$encryptionProtocol, $user);
 		} catch (Horde_Imap_Client_Exception $e) {
 			$error = $e->getMessage();
 			$this->logger->info("Test-Account-Failed: $this->userId, $host, $port, $user, $encryptionProtocol -> $error");
@@ -171,7 +181,8 @@ class IspDbConfigurationDetector {
 	 * @param string $password
 	 * @return boolean
 	 */
-	private function detectSmtp(array $ispdb, MailAccount $account, $email, $password) {
+	private function detectSmtp(array $ispdb, MailAccount $account, $email,
+		$password) {
 		if (!isset($ispdb['smtp'])) {
 			// Nothing to detect
 			return null;
@@ -194,7 +205,8 @@ class IspDbConfigurationDetector {
 	 * @param string $password
 	 * @return boolean
 	 */
-	private function testSmtpConfiguration(array $smtp, MailAccount $account, $email, $password) {
+	private function testSmtpConfiguration(array $smtp, MailAccount $account,
+		$email, $password) {
 		try {
 			if ($smtp['username'] === '%EMAILADDRESS%') {
 				$user = $email;
@@ -211,7 +223,7 @@ class IspDbConfigurationDetector {
 			$account->setOutboundUser($user);
 			$account->setOutboundSslMode(strtolower($smtp['socketType']));
 
-			$a = new Account($account);
+			$a = $this->accountService->newAccount($account);
 			$transport = $this->smtpClientFactory->create($a);
 			if ($transport instanceof Horde_Mail_Transport_Smtphorde) {
 				$transport->getSMTPObject();

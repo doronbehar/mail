@@ -45,15 +45,16 @@ use Horde_Mime_Headers_Date;
 use Horde_Mime_Headers_MessageId;
 use Horde_Mime_Mail;
 use JsonSerializable;
-use OC;
 use OCA\Mail\Cache\Cache;
 use OCA\Mail\Db\Alias;
 use OCA\Mail\Db\MailAccount;
 use OCA\Mail\Model\IMessage;
 use OCA\Mail\Model\Message;
 use OCA\Mail\Model\ReplyMessage;
+use OCA\Mail\Service\Logger;
 use OCP\ICacheFactory;
 use OCP\IConfig;
+use OCP\IL10N;
 use OCP\Security\ICrypto;
 
 class Account implements JsonSerializable {
@@ -76,19 +77,33 @@ class Account implements JsonSerializable {
 	/** @var ICacheFactory */
 	private $memcacheFactory;
 
+	/** @var Logger */
+	private $logger;
+
+	/** @var IL10N */
+	private $l10n;
+
 	/** @var Alias */
 	private $alias;
 
 	/**
 	 * @param MailAccount $account
+	 * @param ICrypto $crypto
+	 * @param IConfig $config
+	 * @param ICacheFactory $cacheFactory
+	 * @param Logger $logger
+	 * @param IL10N $l10n
 	 */
-	public function __construct(MailAccount $account) {
+	public function __construct(MailAccount $account, ICrypto $crypto,
+		IConfig $config, ICacheFactory $cacheFactory, Logger $logger, IL10N $l10n) {
 		$this->account = $account;
 		$this->mailboxes = null;
-		$this->crypto = OC::$server->getCrypto();
-		$this->config = OC::$server->getConfig();
-		$this->memcacheFactory = OC::$server->getMemcacheFactory();
+		$this->crypto = $crypto;
+		$this->config = $config;
+		$this->memcacheFactory = $cacheFactory;
+		$this->logger = $logger;
 		$this->alias = null;
+		$this->l10n = $l10n;
 	}
 
 	public function getMailAccount() {
@@ -153,7 +168,7 @@ class Account implements JsonSerializable {
 						'backend' => new Cache(array(
 							'cacheob' => $this->memcacheFactory
 								->createDistributed(md5($this->getId() . $this->getEMailAddress()))
-						))];
+					))];
 				}
 			}
 			$this->client = new \Horde_Imap_Client_Socket($params);
@@ -183,7 +198,8 @@ class Account implements JsonSerializable {
 	 * @param int|null $draftUID
 	 * @return int message UID
 	 */
-	public function sendMessage(IMessage $message, Horde_Mail_Transport $transport, $draftUID) {
+	public function sendMessage(IMessage $message, Horde_Mail_Transport $transport,
+		$draftUID) {
 		// build mime body
 		$headers = [
 			'From' => $message->getFrom()->first()->toHorde(),
@@ -359,8 +375,9 @@ class Account implements JsonSerializable {
 	 * @param bool $base64_encode
 	 * @return array In the form [<special use>=><folder id>, ...]
 	 */
-	public function getSpecialFoldersIds($base64_encode=true) {
-		$folderRoles = ['inbox', 'sent', 'drafts', 'trash', 'archive', 'junk', 'flagged', 'all'];
+	public function getSpecialFoldersIds($base64_encode = true) {
+		$folderRoles = ['inbox', 'sent', 'drafts', 'trash', 'archive', 'junk', 'flagged',
+			'all'];
 		$specialFoldersIds = [];
 
 		foreach ($folderRoles as $role) {
@@ -437,7 +454,8 @@ class Account implements JsonSerializable {
 			$createTrash = false;
 		} else {
 			// no trash -> guess
-			$trashes = array_filter($this->getMailboxes(), function($box) {
+			$trashes = array_filter($this->getMailboxes(),
+				function($box) {
 				/**
 				 * @var Mailbox $box
 				 */
@@ -457,19 +475,20 @@ class Account implements JsonSerializable {
 			$this->getImapConnection()->expunge($hordeSourceMailBox,
 				array('ids' => $hordeMessageIds, 'delete' => true));
 
-			OC::$server->getLogger()->info("Message expunged: {message} from mailbox {mailbox}",
+			$this->logger->info("Message expunged: {message} from mailbox {mailbox}",
 				array('message' => $messageId, 'mailbox' => $sourceFolderId));
 		} else {
 			$this->getImapConnection()->copy($hordeSourceMailBox, $hordeTrashMailBox,
 				array('create' => $createTrash, 'move' => true, 'ids' => $hordeMessageIds));
 
-			OC::$server->getLogger()->info("Message moved to trash: {message} from mailbox {mailbox}",
+			$this->logger->info("Message moved to trash: {message} from mailbox {mailbox}",
 				array('message' => $messageId, 'mailbox' => $sourceFolderId, 'app' => 'mail'));
 		}
 	}
 
 	public function moveMessage($sourceFolderId, $messageId, $destFolderId) {
-		$this->getImapConnection()->copy($sourceFolderId, $destFolderId, [
+		$this->getImapConnection()->copy($sourceFolderId, $destFolderId,
+			[
 			'ids' => new \Horde_Imap_Client_Ids($messageId),
 			'move' => true,
 		]);
@@ -480,9 +499,11 @@ class Account implements JsonSerializable {
 	 */
 	private function deleteDraft($messageId) {
 		$draftsFolder = $this->getDraftsFolder();
-		$draftsFolder->setMessageFlag($messageId, Horde_Imap_Client::FLAG_DELETED, true);
+		$draftsFolder->setMessageFlag($messageId, Horde_Imap_Client::FLAG_DELETED,
+			true);
 
-		$draftsMailBox = new Horde_Imap_Client_Mailbox($draftsFolder->getFolderId(), false);
+		$draftsMailBox = new Horde_Imap_Client_Mailbox($draftsFolder->getFolderId(),
+			false);
 		$this->getImapConnection()->expunge($draftsMailBox);
 	}
 
@@ -521,7 +542,7 @@ class Account implements JsonSerializable {
 	 *
 	 * @return Mailbox[] if $guessBest is false, or Mailbox if $guessBest is true. Empty [] if no match.
 	 */
-	protected function getSpecialFolder($role, $guessBest=true) {
+	protected function getSpecialFolder($role, $guessBest = true) {
 
 		$specialFolders = [];
 		foreach ($this->getMailboxes() as $mailbox) {
@@ -545,24 +566,23 @@ class Account implements JsonSerializable {
 	 */
 	protected function localizeSpecialMailboxes() {
 
-		$l = OC::$server->getL10N('mail');
 		$map = [
 			// TRANSLATORS: translated mail box name
-			'inbox'   => $l->t('Inbox'),
+			'inbox' => $this->l10n->t('Inbox'),
 			// TRANSLATORS: translated mail box name
-			'sent'    => $l->t('Sent'),
+			'sent' => $this->l10n->t('Sent'),
 			// TRANSLATORS: translated mail box name
-			'drafts'  => $l->t('Drafts'),
+			'drafts' => $this->l10n->t('Drafts'),
 			// TRANSLATORS: translated mail box name
-			'archive' => $l->t('Archive'),
+			'archive' => $this->l10n->t('Archive'),
 			// TRANSLATORS: translated mail box name
-			'trash'   => $l->t('Trash'),
+			'trash' => $this->l10n->t('Trash'),
 			// TRANSLATORS: translated mail box name
-			'junk'    => $l->t('Junk'),
+			'junk' => $this->l10n->t('Junk'),
 			// TRANSLATORS: translated mail box name
-			'all'     => $l->t('All'),
+			'all' => $this->l10n->t('All'),
 			// TRANSLATORS: translated mail box name
-			'flagged' => $l->t('Favorites'),
+			'flagged' => $this->l10n->t('Favorites'),
 		];
 		$mailboxes = $this->getMailboxes();
 		$specialIds = $this->getSpecialFoldersIds(false);
@@ -570,7 +590,7 @@ class Account implements JsonSerializable {
 			if (in_array($mailbox->getFolderId(), $specialIds) === true) {
 				if (isset($map[$mailbox->getSpecialRole()])) {
 					$translatedDisplayName = $map[$mailbox->getSpecialRole()];
-					$mailboxes[$i]->setDisplayName((string)$translatedDisplayName);
+					$mailboxes[$i]->setDisplayName((string) $translatedDisplayName);
 				}
 			}
 		}
@@ -586,7 +606,8 @@ class Account implements JsonSerializable {
 	protected function sortMailboxes() {
 
 		$mailboxes = $this->getMailboxes();
-		usort($mailboxes, function($a, $b) {
+		usort($mailboxes,
+			function($a, $b) {
 			/**
 			 * @var Mailbox $a
 			 * @var Mailbox $b
@@ -594,14 +615,14 @@ class Account implements JsonSerializable {
 			$roleA = $a->getSpecialRole();
 			$roleB = $b->getSpecialRole();
 			$specialRolesOrder = [
-				'all'     => 0,
-				'inbox'   => 1,
+				'all' => 0,
+				'inbox' => 1,
 				'flagged' => 2,
-				'drafts'  => 3,
-				'sent'    => 4,
+				'drafts' => 3,
+				'sent' => 4,
 				'archive' => 5,
-				'junk'    => 6,
-				'trash'   => 7,
+				'junk' => 6,
+				'trash' => 7,
 			];
 			// if there is a flag unknown to us, we ignore it for sorting :
 			// the folder will be sorted by name like any other 'normal' folder
