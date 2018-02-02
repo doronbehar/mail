@@ -146,6 +146,7 @@ class MessagesController extends Controller {
 	 */
 	private function loadMessage($accountId, $folderId, $id) {
 		$account = $this->getAccount($accountId);
+		// TODO: FIX
 		$mailBox = $account->getMailbox(base64_decode($folderId));
 		/* @var $message IMAPMessage */
 		$message = $mailBox->getMessage($id);

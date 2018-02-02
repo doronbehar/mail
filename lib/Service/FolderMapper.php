@@ -22,10 +22,13 @@
 namespace OCA\Mail\Service;
 
 use Horde_Imap_Client;
+use Horde_Imap_Client_Mailbox;
 use Horde_Imap_Client_Socket;
 use OCA\Mail\Account;
 use OCA\Mail\Folder;
+use OCA\Mail\Mailbox;
 use OCA\Mail\SearchFolder;
+use OCA\Mail\SearchMailbox;
 
 class FolderMapper {
 
@@ -37,7 +40,8 @@ class FolderMapper {
 	 */
 	public function getFolders(Account $account, Horde_Imap_Client_Socket $client,
 		$pattern = '*') {
-		$mailboxes = $client->listMailboxes($pattern, Horde_Imap_Client::MBOX_ALL, [
+		$mailboxes = $client->listMailboxes($pattern, Horde_Imap_Client::MBOX_ALL,
+			[
 			'delimiter' => true,
 			'attributes' => true,
 			'special_use' => true,
@@ -59,7 +63,8 @@ class FolderMapper {
 				continue;
 			}
 
-			$folder = new Folder($account, $mailbox['mailbox'], $mailbox['attributes'], $mailbox['delimiter']);
+			$folder = new Folder($account, $mailbox['mailbox'], $mailbox['attributes'],
+				$mailbox['delimiter']);
 
 			if ($folder->isSearchable()) {
 				$folder->setSyncToken($client->getSyncToken($folder->getMailbox()));
@@ -67,7 +72,8 @@ class FolderMapper {
 
 			$folders[] = $folder;
 			if ($mailbox['mailbox']->utf8 === 'INBOX') {
-				$searchFolder = new SearchFolder($account, $mailbox['mailbox'], $mailbox['attributes'], $mailbox['delimiter']);
+				$searchFolder = new SearchFolder($account, $mailbox['mailbox'],
+					$mailbox['attributes'], $mailbox['delimiter']);
 				if ($searchFolder->isSearchable()) {
 					$searchFolder->setSyncToken($client->getSyncToken($folder->getMailbox()));
 				}
@@ -87,7 +93,8 @@ class FolderMapper {
 			$indexedFolders[$folder->getMailbox()] = $folder;
 		}
 
-		$top = array_filter($indexedFolders, function(Folder $folder) {
+		$top = array_filter($indexedFolders,
+			function(Folder $folder) {
 			return $folder instanceof SearchFolder || is_null($this->getParentId($folder));
 		});
 
@@ -103,6 +110,147 @@ class FolderMapper {
 		}
 
 		return array_values($top);
+	}
+
+	/**
+	 * @param Account $account
+	 * @param string $id
+	 * @return Mailbox
+	 */
+	public function find(Account $account, $id) {
+		$parts = explode('/', $id);
+		if (count($parts) > 1 && $parts[1] === 'FLAGGED') {
+			$mailbox = new Horde_Imap_Client_Mailbox($parts[0]);
+			return new SearchMailbox($conn, $mailbox, []);
+		}
+		$mailbox = new Horde_Imap_Client_Mailbox($id);
+		return new Mailbox($conn, $mailbox, []);
+	}
+
+	/**
+	 * Get the drafts mailbox
+	 *
+	 * @param Account $account
+	 * @param Horde_Imap_Client_Socket $client
+	 * @return Mailbox The best candidate for the "drafts" inbox
+	 */
+	public function findDraftsFolder(Account $account,
+		Horde_Imap_Client_Socket $client) {
+		// check for existence
+		$draftsFolder = $this->findSpecialFolder($this->getFolders($account, $client),
+			'drafts');
+		if ($draftsFolder === null) {
+			// drafts folder does not exist - let's create one
+			// TODO: also search for translated drafts mailboxes
+			return $this->create($client, 'Drafts',
+					[
+					'special_use' => ['drafts'],
+			]);
+		}
+		return $draftsFolder;
+	}
+
+	/**
+	 * @return Mailbox|null
+	 */
+	public function findInbox(Account $account) {
+		return $this->findSpecialFolder($this->findAll($account), 'inbox');
+	}
+
+	/**
+	 * Get the "sent mail" mailbox
+	 *
+	 * @param Account $account
+	 * @param Horde_Imap_Client_Socket $client
+	 * @return Mailbox
+	 */
+	public function findSentFolder(Account $account,
+		Horde_Imap_Client_Socket $client) {
+		//check for existence
+		$sentFolders = $this->findSpecialFolder($this->getFolders($account, $client),
+			'sent');
+		if (is_null($sentFolders)) {
+			//sent folder does not exist - let's create one
+			//TODO: also search for translated sent mailboxes
+			return $this->create($client, 'Sent', [
+					'special_use' => ['sent'],
+			]);
+		}
+		return $sentFolders;
+	}
+
+	/**
+	 * @param Account $account
+	 * @param Horde_Imap_Client_Socket $client
+	 * @param string $mailBox
+	 * @param string $opts
+	 * @return Folder
+	 */
+	public function create(Horde_Imap_Client_Socket $client, $mailBox, $opts = []) {
+		$client->createMailbox($mailBox, $opts);
+
+		return $this->find($mailBox);
+	}
+
+	/**
+	 * @param Account $account
+	 * @param string $mailBox
+	 */
+	public function delete(Account $account, $mailBox) {
+		if ($mailBox instanceof Mailbox) {
+			$mailBox = $mailBox->getFolderId();
+		}
+		$conn = $account->getImapConnection();
+		$conn->deleteMailbox($mailBox);
+	}
+
+	/**
+	 * Get mailbox(es) that have the given special use role
+	 *
+	 * With this method we can get a list of all mailboxes that have been
+	 * determined to have a specific special use role. It can also return
+	 * the best candidate for this role, for situations where we want
+	 * one single folder.
+	 *
+	 * @param Mailbox[] $mailboxes
+	 * @param string $role Special role of the folder we want to get ('sent', 'inbox', etc.)
+	 * @param bool $guessBest If set to true, return only the folder with the most messages in it
+	 *
+	 * @return Mailbox|null
+	 */
+	private function findSpecialFolder(array $folders, $role) {
+		$specialFolders = array_filter($folders,
+			function(Folder $folder) use ($role) {
+			return in_array($role, $folder->getSpecialUse(), true);
+		});
+
+		if (empty($specialFolders)) {
+			return null;
+		}
+
+		return $this->guessBestMailBox($specialFolders);
+	}
+
+	/**
+	 * Get 'best' mailbox guess
+	 *
+	 * For now the best candidate is the one with
+	 * the most messages in it.
+	 *
+	 * @param array $mailboxes
+	 * @return Mailbox
+	 */
+	private function guessBestMailBox(array $mailboxes) {
+		$maxMessages = -1;
+		$bestGuess = null;
+		foreach ($mailboxes as $mailbox) {
+			/** @var Mailbox $folder */
+			if ($mailbox->getTotalMessages() > $maxMessages) {
+				$maxMessages = $mailbox->getTotalMessages();
+				$bestGuess = $mailbox;
+			}
+		}
+		return $bestGuess;
 	}
 
 	/**
@@ -126,7 +274,9 @@ class FolderMapper {
 		Horde_Imap_Client_Socket $client) {
 		$mailboxes = array_map(function(Folder $folder) {
 			return $folder->getMailbox();
-		}, array_filter($folders, function(Folder $folder) {
+		},
+			array_filter($folders,
+				function(Folder $folder) {
 				return $folder->isSearchable();
 			}));
 
@@ -155,7 +305,7 @@ class FolderMapper {
 	 *
 	 * @param Folder $folder
 	 */
-	protected function detectSpecialUse(Folder $folder) {
+	private function detectSpecialUse(Folder $folder) {
 		/*
 		 * @todo: support multiple attributes on same folder
 		 * "any given server or  message store may support
@@ -217,7 +367,8 @@ class FolderMapper {
 	 * @return Folder[]
 	 */
 	public function sortFolders(array &$folders) {
-		usort($folders, function(Folder $f1, Folder $f2) {
+		usort($folders,
+			function(Folder $f1, Folder $f2) {
 			$specialUse1 = $f1->getSpecialUse();
 			$specialUse2 = $f2->getSpecialUse();
 			$roleA = count($specialUse1) > 0 ? reset($specialUse1) : null;

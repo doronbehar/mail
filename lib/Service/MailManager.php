@@ -1,6 +1,5 @@
 <?php
 
-
 /**
  * @author Christoph Wurst <christoph@winzerhof-wurst.at>
  *
@@ -22,6 +21,8 @@
 
 namespace OCA\Mail\Service;
 
+use Horde_Imap_Client_Ids;
+use Horde_Imap_Client_Mailbox;
 use OCA\Mail\Account;
 use OCA\Mail\Contracts\IMailManager;
 use OCA\Mail\Folder;
@@ -29,6 +30,7 @@ use OCA\Mail\IMAP\IMAPClientFactory;
 use OCA\Mail\IMAP\Sync\Request;
 use OCA\Mail\IMAP\Sync\Response;
 use OCA\Mail\IMAP\Sync\Synchronizer;
+use OCA\Mail\Mailbox;
 use OCA\Mail\Service\FolderMapper;
 use OCA\Mail\Service\FolderNameTranslator;
 
@@ -52,8 +54,9 @@ class MailManager implements IMailManager {
 	 * @param FolderNameTranslator $folderNameTranslator
 	 * @param Synchronizer $synchronizer
 	 */
-	public function __construct(IMAPClientFactory $imapClientFactory, FolderMapper $folderMapper,
-		FolderNameTranslator $folderNameTranslator, Synchronizer $synchronizer) {
+	public function __construct(IMAPClientFactory $imapClientFactory,
+		FolderMapper $folderMapper, FolderNameTranslator $folderNameTranslator,
+		Synchronizer $synchronizer) {
 		$this->imapClientFactory = $imapClientFactory;
 		$this->folderMapper = $folderMapper;
 		$this->folderNameTranslator = $folderNameTranslator;
@@ -84,6 +87,91 @@ class MailManager implements IMailManager {
 		$client = $this->imapClientFactory->getClient($account);
 
 		return $this->synchronizer->sync($client, $syncRequest);
+	}
+
+	/**
+	 * @param Account $account
+	 * @param string $sourceFolderId
+	 * @param int  $messageId
+	 * @param string $destFolderId
+	 */
+	public function moveMessage(Account $account, $sourceFolderId, $messageId,
+		$destFolderId) {
+		$client = $this->imapClientFactory->getClient($account);
+
+		$client->copy($sourceFolderId, $destFolderId,
+			[
+			'ids' => new Horde_Imap_Client_Ids($messageId),
+			'move' => true,
+		]);
+	}
+
+	/**
+	 * @param Account $account
+	 * @param string $sourceFolderId
+	 * @param int $messageId
+	 */
+	public function deleteMessage(Account $account, $sourceFolderId, $messageId) {
+		$client = $this->imapClientFactory->getClient($account);
+
+		// TODO: fix
+		$mb = $this->getMailbox($sourceFolderId);
+		// by default we will create a 'Trash' folder if no trash is found
+		$trashId = "Trash";
+		$createTrash = true;
+
+		// TODO: FIX
+		$trashFolders = $this->getSpecialFolder('trash', true);
+
+		if (count($trashFolders) !== 0) {
+			$trashId = $trashFolders[0]->getFolderId();
+			$createTrash = false;
+		} else {
+			// no trash -> guess
+			// TODO: FIX
+			$trashes = array_filter($this->getMailboxes(),
+				function($box) {
+				/**
+				 * @var Mailbox $box
+				 */
+				return (stripos($box->getDisplayName(), 'trash') !== false);
+			});
+			if (!empty($trashes)) {
+				$trashId = array_values($trashes);
+				$trashId = $trashId[0]->getFolderId();
+				$createTrash = false;
+			}
+		}
+
+		$hordeMessageIds = new Horde_Imap_Client_Ids($messageId);
+		$hordeTrashMailBox = new Horde_Imap_Client_Mailbox($trashId);
+
+		if ($sourceFolderId === $trashId) {
+			$client->expunge($sourceFolderId,
+				[
+				'ids' => $hordeMessageIds,
+				'delete' => true
+			]);
+
+			$this->logger->info("Message expunged: {message} from mailbox {mailbox}",
+				[
+				'message' => $messageId,
+				'mailbox' => $sourceFolderId
+			]);
+		} else {
+			$client->copy($sourceFolderId, $hordeTrashMailBox,
+				[
+				'create' => $createTrash,
+				'move' => true,
+				'ids' => $hordeMessageIds
+			]);
+
+			$this->logger->info("Message moved to trash: {message} from mailbox {mailbox}",
+				[
+				'message' => $messageId,
+				'mailbox' => $sourceFolderId
+			]);
+		}
 	}
 
 }

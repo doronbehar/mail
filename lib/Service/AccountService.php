@@ -30,16 +30,12 @@ use OCA\Mail\Exception\ServiceException;
 use OCA\Mail\Service\DefaultAccount\Manager;
 use OCP\ICacheFactory;
 use OCP\IConfig;
-use OCP\IL10N;
 use OCP\Security\ICrypto;
 
 class AccountService {
 
 	/** @var MailAccountMapper */
 	private $mapper;
-
-	/** @var IL10N */
-	private $l10n;
 
 	/** @var Manager */
 	private $defaultAccountManager;
@@ -65,18 +61,16 @@ class AccountService {
 
 	/**
 	 * @param MailAccountMapper $mapper
-	 * @param IL10N $l10n
 	 * @param Manager $defaultAccountManager
 	 * @param ICrypto $crypto
 	 * @param IConfig $config
 	 * @param ICacheFactory $cacheFactory
-	 * @param \OCA\Mail\Service\Logger $logger
+	 * @param Logger $logger
 	 */
-	public function __construct(MailAccountMapper $mapper, IL10N $l10n,
+	public function __construct(MailAccountMapper $mapper,
 		Manager $defaultAccountManager, ICrypto $crypto, IConfig $config,
 		ICacheFactory $cacheFactory, Logger $logger) {
 		$this->mapper = $mapper;
-		$this->l10n = $l10n;
 		$this->defaultAccountManager = $defaultAccountManager;
 		$this->crypto = $crypto;
 		$this->config = $config;
@@ -84,9 +78,13 @@ class AccountService {
 		$this->logger = $logger;
 	}
 
+	/**
+	 * @param MailAccount $mailAccount
+	 * @return Account
+	 */
 	public function newAccount(MailAccount $mailAccount) {
 		return new Account($mailAccount, $this->crypto, $this->config,
-			$this->cacheFactory, $this->logger, $this->l10n);
+			$this->cacheFactory, $this->logger);
 	}
 
 	/**

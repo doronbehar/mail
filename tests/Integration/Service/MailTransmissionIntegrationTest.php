@@ -26,10 +26,13 @@ use OCA\Mail\Account;
 use OCA\Mail\Contracts\IAttachmentService;
 use OCA\Mail\Contracts\IMailTransmission;
 use OCA\Mail\Db\MailAccount;
+use OCA\Mail\IMAP\IMAPClientFactory;
 use OCA\Mail\Model\NewMessageData;
 use OCA\Mail\Model\RepliedMessageData;
+use OCA\Mail\Service\AccountService;
 use OCA\Mail\Service\Attachment\UploadedFile;
 use OCA\Mail\Service\AutoCompletion\AddressCollector;
+use OCA\Mail\Service\FolderMapper;
 use OCA\Mail\Service\Logger;
 use OCA\Mail\Service\MailTransmission;
 use OCA\Mail\SMTP\SmtpClientFactory;
@@ -59,7 +62,9 @@ class MailTransmissionIntegrationTest extends TestCase {
 		parent::setUp();
 
 		$crypo = OC::$server->getCrypto();
-		$this->account = new Account(MailAccount::fromParams([
+		/* @var $accountService AccountService */
+		$accountService = OC::$server->query(AccountService::class);
+		$this->account = $accountService->newAccount(MailAccount::fromParams([
 				'email' => 'user@domain.tld',
 				'inboundHost' => 'localhost',
 				'inboundPort' => '993',
@@ -75,11 +80,16 @@ class MailTransmissionIntegrationTest extends TestCase {
 		$this->attachmentService = OC::$server->query(IAttachmentService::class);
 		$this->user = $this->createTestUser();
 		$userFolder = OC::$server->getUserFolder($this->user->getUID());
-		$this->transmission = new MailTransmission(OC::$server->query(AddressCollector::class), $userFolder, $this->attachmentService, OC::$server->query(SmtpClientFactory::class), OC::$server->query(Logger::class));
+		$this->transmission = new MailTransmission(OC::$server->query(AddressCollector::class),
+			$userFolder, $this->attachmentService,
+			OC::$server->query(IMAPClientFactory::class),
+			OC::$server->query(SmtpClientFactory::class),
+			OC::$server->query(FolderMapper::class), OC::$server->query(Logger::class));
 	}
 
 	public function testSendMail() {
-		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com', null, null, 'greetings', 'hello there', []);
+		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com',
+				null, null, 'greetings', 'hello there', []);
 		$reply = new RepliedMessageData($this->account, null, null);
 		$this->transmission->sendMessage('ferdinand', $message, $reply);
 	}
@@ -90,7 +100,9 @@ class MailTransmissionIntegrationTest extends TestCase {
 			'tmp_name' => dirname(__FILE__) . '/../../data/mail-message-123.txt',
 		]);
 		$this->attachmentService->addFile('gerald', $file);
-		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com', null, null, 'greetings', 'hello there', [
+		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com',
+				null, null, 'greetings', 'hello there',
+				[
 				[
 					'isLocal' => 'true',
 					'id' => 13,
@@ -103,7 +115,9 @@ class MailTransmissionIntegrationTest extends TestCase {
 	public function testSendMailWithCloudAttachment() {
 		$userFolder = OC::$server->getUserFolder($this->user->getUID());
 		$userFolder->newFile('text.txt');
-		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com', null, null, 'greetings', 'hello there', [
+		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com',
+				null, null, 'greetings', 'hello there',
+				[
 				[
 					'isLocal' => false,
 					'fileName' => 'text.txt',
@@ -123,7 +137,8 @@ class MailTransmissionIntegrationTest extends TestCase {
 			->finish();
 		$originalUID = $this->saveMessage('inbox', $originalMessage);
 
-		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com', null, null, 'greetings', 'hello there', []);
+		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com',
+				null, null, 'greetings', 'hello there', []);
 		$reply = new RepliedMessageData($this->account, $inbox, $originalUID);
 		$uid = $this->transmission->sendMessage('ferdinand', $message, $reply);
 
@@ -142,7 +157,8 @@ class MailTransmissionIntegrationTest extends TestCase {
 			->finish();
 		$originalUID = $this->saveMessage('inbox', $originalMessage);
 
-		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com', null, null, null, 'hello there', []);
+		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com',
+				null, null, null, 'hello there', []);
 		$reply = new RepliedMessageData($this->account, $inbox, $originalUID);
 		$uid = $this->transmission->sendMessage('ferdinand', $message, $reply);
 
@@ -161,7 +177,8 @@ class MailTransmissionIntegrationTest extends TestCase {
 			->finish();
 		$originalUID = $this->saveMessage('inbox', $originalMessage);
 
-		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com', null, null, 'Re: reply test', 'hello there', []);
+		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com',
+				null, null, 'Re: reply test', 'hello there', []);
 		$reply = new RepliedMessageData($this->account, $inbox, $originalUID);
 		$uid = $this->transmission->sendMessage('ferdinand', $message, $reply);
 
@@ -171,7 +188,8 @@ class MailTransmissionIntegrationTest extends TestCase {
 	}
 
 	public function testSaveNewDraft() {
-		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com', null, null, 'greetings', 'hello there', []);
+		$message = NewMessageData::fromRequest($this->account, 'recipient@domain.com',
+				null, null, 'greetings', 'hello there', []);
 		$uid = $this->transmission->saveDraft($message);
 		// There should be a new mailbox …
 		$this->assertMailboxExists('Drafts');
@@ -182,9 +200,11 @@ class MailTransmissionIntegrationTest extends TestCase {
 	}
 
 	public function testReplaceDraft() {
-		$message1 = NewMessageData::fromRequest($this->account, 'recipient@domain.com', null, null, 'greetings', 'hello t', []);
+		$message1 = NewMessageData::fromRequest($this->account,
+				'recipient@domain.com', null, null, 'greetings', 'hello t', []);
 		$uid = $this->transmission->saveDraft($message1);
-		$message2 = NewMessageData::fromRequest($this->account, 'recipient@domain.com', null, null, 'greetings', 'hello there', []);
+		$message2 = NewMessageData::fromRequest($this->account,
+				'recipient@domain.com', null, null, 'greetings', 'hello there', []);
 		$this->transmission->saveDraft($message2, $uid);
 
 		$this->assertMessageCount(1, 'Drafts');

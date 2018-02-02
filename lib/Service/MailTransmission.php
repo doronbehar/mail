@@ -24,6 +24,7 @@ namespace OCA\Mail\Service;
 use Exception;
 use Horde_Exception;
 use Horde_Imap_Client;
+use Horde_Imap_Client_Mailbox;
 use OC\Files\Node\File;
 use OCA\Mail\Account;
 use OCA\Mail\Address;
@@ -33,6 +34,7 @@ use OCA\Mail\Contracts\IMailTransmission;
 use OCA\Mail\Db\Alias;
 use OCA\Mail\Exception\AttachmentNotFoundException;
 use OCA\Mail\Exception\ServiceException;
+use OCA\Mail\IMAP\IMAPClientFactory;
 use OCA\Mail\Model\IMessage;
 use OCA\Mail\Model\NewMessageData;
 use OCA\Mail\Model\RepliedMessageData;
@@ -51,24 +53,37 @@ class MailTransmission implements IMailTransmission {
 	/** @var IAttachmentService */
 	private $attachmentService;
 
+	/** @var IMAPClientFactory */
+	private $imapClientFactory;
+
 	/** @var SmtpClientFactory */
-	private $clientFactory;
+	private $smtpClientFactory;
+
+	/** @var FolderMapper */
+	private $folderMapper;
 
 	/** @var Logger */
 	private $logger;
 
 	/**
 	 * @param AddressCollector $addressCollector
-	 * @param Folder $userFolder
+	 * @param type $userFolder
 	 * @param IAttachmentService $attachmentService
-	 * @param SmtpClientFactory $clientFactory
+	 * @param IMAPClientFactory $imapClientFactory
+	 * @param SmtpClientFactory $smtpClientFactory
+	 * @param FolderMapper $folderMapper
 	 * @param Logger $logger
 	 */
-	public function __construct(AddressCollector $addressCollector, $userFolder, IAttachmentService $attachmentService, SmtpClientFactory $clientFactory, Logger $logger) {
+	public function __construct(AddressCollector $addressCollector, $userFolder,
+		IAttachmentService $attachmentService, IMAPClientFactory $imapClientFactory,
+		SmtpClientFactory $smtpClientFactory, FolderMapper $folderMapper,
+		Logger $logger) {
 		$this->addressCollector = $addressCollector;
 		$this->userFolder = $userFolder;
 		$this->attachmentService = $attachmentService;
-		$this->clientFactory = $clientFactory;
+		$this->imapClientFactory = $imapClientFactory;
+		$this->smtpClientFactory = $smtpClientFactory;
+		$this->folderMapper = $folderMapper;
 		$this->logger = $logger;
 	}
 
@@ -82,7 +97,8 @@ class MailTransmission implements IMailTransmission {
 	 * @param int|null $draftUID
 	 * @return int message UID
 	 */
-	public function sendMessage($userId, NewMessageData $messageData, RepliedMessageData $replyData, Alias $alias = null, $draftUID = null) {
+	public function sendMessage($userId, NewMessageData $messageData,
+		RepliedMessageData $replyData, Alias $alias = null, $draftUID = null) {
 		$account = $messageData->getAccount();
 
 		if ($replyData->isReply()) {
@@ -102,13 +118,20 @@ class MailTransmission implements IMailTransmission {
 		$message->setContent($messageData->getBody());
 		$this->handleAttachments($userId, $messageData, $message);
 
-		$transport = $this->clientFactory->create($account);
-		$uid = $account->sendMessage($message, $transport, $draftUID);
+		$client = $this->imapClientFactory->getClient($account);
+		$transport = $this->smtpClientFactory->create($account);
+		$uid = $account->sendMessage($message, $transport,
+			$this->folderMapper->findSentFolder($account, $client));
 
 		if ($replyData->isReply()) {
 			$this->flagRepliedMessage($account, $replyData);
 		}
 		$this->collectMailAddresses($message);
+
+		if (!is_null($draftUID)) {
+			// TODO: fix
+			$this->deleteDraft($draftUID);
+		}
 
 		return $uid;
 	}
@@ -121,6 +144,7 @@ class MailTransmission implements IMailTransmission {
 	 */
 	public function saveDraft(NewMessageData $message, $draftUID = null) {
 		$account = $message->getAccount();
+		$client = $this->smtpClientFactory->create($account);
 		$imapMessage = $account->newMessage();
 		$imapMessage->setTo($message->getTo());
 		$imapMessage->setSubject($message->getSubject() ?: '');
@@ -134,6 +158,10 @@ class MailTransmission implements IMailTransmission {
 
 		// create transport and save message
 		try {
+			if (!is_null($draftUID)) {
+				// TODO: fix
+				$this->deleteDraft($draftUID);
+			}
 			return $account->saveDraft($imapMessage, $draftUID);
 		} catch (Horde_Exception $ex) {
 			throw new ServiceException('Could not save draft message', 0, $ex);
@@ -146,7 +174,8 @@ class MailTransmission implements IMailTransmission {
 	 * @param RepliedMessageData $replyData
 	 * @return IMessage
 	 */
-	private function buildReplyMessage(Account $account, NewMessageData $messageData, RepliedMessageData $replyData) {
+	private function buildReplyMessage(Account $account,
+		NewMessageData $messageData, RepliedMessageData $replyData) {
 		// Reply
 		$message = $account->newReplyMessage();
 
@@ -187,9 +216,11 @@ class MailTransmission implements IMailTransmission {
 	 * @param Account $account
 	 * @param RepliedMessageData $replyData
 	 */
-	private function flagRepliedMessage(Account $account, RepliedMessageData $replyData) {
+	private function flagRepliedMessage(Account $account,
+		RepliedMessageData $replyData) {
 		$mailbox = $account->getMailbox(base64_decode($replyData->getFolderId()));
-		$mailbox->setMessageFlag($replyData->getId(), Horde_Imap_Client::FLAG_ANSWERED, true);
+		$mailbox->setMessageFlag($replyData->getId(),
+			Horde_Imap_Client::FLAG_ANSWERED, true);
 	}
 
 	/**
@@ -197,7 +228,8 @@ class MailTransmission implements IMailTransmission {
 	 * @param NewMessageData $messageData
 	 * @param IMessage $message
 	 */
-	private function handleAttachments($userId, NewMessageData $messageData, IMessage $message) {
+	private function handleAttachments($userId, NewMessageData $messageData,
+		IMessage $message) {
 		foreach ($messageData->getAttachments() as $attachment) {
 			if (isset($attachment['isLocal']) && $attachment['isLocal'] === 'true') {
 				$this->handleLocalAttachment($userId, $attachment, $message);
@@ -213,7 +245,8 @@ class MailTransmission implements IMailTransmission {
 	 * @param IMessage $message
 	 * @return int|null
 	 */
-	private function handleLocalAttachment($userId, array $attachment, IMessage $message) {
+	private function handleLocalAttachment($userId, array $attachment,
+		IMessage $message) {
 		if (!isset($attachment['id'])) {
 			$this->logger->warning('ignoring local attachment because its id is unknown');
 			return null;
@@ -222,7 +255,8 @@ class MailTransmission implements IMailTransmission {
 		$id = $attachment['id'];
 
 		try {
-			list($localAttachment, $file) = $this->attachmentService->getAttachment($userId, $id);
+			list($localAttachment, $file) = $this->attachmentService->getAttachment($userId,
+				$id);
 			$message->addLocalAttachment($localAttachment, $file);
 		} catch (AttachmentNotFoundException $ex) {
 			$this->logger->warning('ignoring local attachment because it does not exist');
@@ -271,6 +305,19 @@ class MailTransmission implements IMailTransmission {
 		} catch (Exception $e) {
 			$this->logger->error("Error while collecting mail addresses: " . $e->getMessage());
 		}
+	}
+
+	/**
+	 * @param int $messageId
+	 */
+	private function deleteDraft($messageId) {
+		$draftsFolder = $this->getDraftsFolder();
+		$draftsFolder->setMessageFlag($messageId, Horde_Imap_Client::FLAG_DELETED,
+			true);
+
+		$draftsMailBox = new Horde_Imap_Client_Mailbox($draftsFolder->getFolderId(),
+			false);
+		$this->getImapConnection()->expunge($draftsMailBox);
 	}
 
 }
