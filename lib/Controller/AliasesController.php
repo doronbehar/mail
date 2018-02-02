@@ -21,11 +21,11 @@
 namespace OCA\Mail\Controller;
 
 use OCA\Mail\Db\Alias;
-use OCP\IRequest;
+use OCA\Mail\Exception\NotImplemented;
 use OCA\Mail\Service\AliasesService;
 use OCP\AppFramework\Controller;
-use OCP\AppFramework\Http\JSONResponse;
-use OCP\AppFramework\Http;
+use OCP\IRequest;
+use OCP\IUser;
 use OCP\IUserSession;
 
 class AliasesController extends Controller {
@@ -34,7 +34,7 @@ class AliasesController extends Controller {
 	private $aliasService;
 
 	/**
-	 * @var \OCP\IUser
+	 * @var IUser
 	 */
 	private $currentUser;
 
@@ -51,6 +51,8 @@ class AliasesController extends Controller {
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
+	 *
 	 * @param int $accountId
 	 * @return Alias[]
 	 */
@@ -60,24 +62,24 @@ class AliasesController extends Controller {
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 */
 	public function show() {
-		$response = new JSONResponse();
-		$response->setStatus(Http::STATUS_NOT_IMPLEMENTED);
-		return $response;
+		throw new NotImplemented();
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 */
 	public function update() {
-		$response = new JSONResponse();
-		$response->setStatus(Http::STATUS_NOT_IMPLEMENTED);
-		return $response;
+		throw new NotImplemented();
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
+	 *
 	 * @param int $id
 	 * @return Alias[]
 	 */
@@ -87,10 +89,12 @@ class AliasesController extends Controller {
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
+	 *
 	 * @param int $accountId
 	 * @param string $alias
 	 * @param string $aliasName
-	 * @return Alias[]
+	 * @return Alias
 	 */
 	public function create($accountId, $alias, $aliasName) {
 		return $this->aliasService->create($accountId, $alias, $aliasName);

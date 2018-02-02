@@ -44,6 +44,8 @@ class AutoCompleteController extends Controller {
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
+	 *
 	 * @param string $term
 	 * @return array
 	 */

@@ -29,6 +29,7 @@ namespace OCA\Mail\Controller;
 use Exception;
 use Horde_Exception;
 use OCA\Mail\Contracts\IMailTransmission;
+use OCA\Mail\Exception\ClientException;
 use OCA\Mail\Exception\ServiceException;
 use OCA\Mail\Model\NewMessageData;
 use OCA\Mail\Model\RepliedMessageData;
@@ -38,9 +39,6 @@ use OCA\Mail\Service\AutoConfig\AutoConfig;
 use OCA\Mail\Service\Logger;
 use OCA\Mail\Service\SetupService;
 use OCP\AppFramework\Controller;
-use OCP\AppFramework\Db\DoesNotExistException;
-use OCP\AppFramework\Http;
-use OCP\AppFramework\Http\JSONResponse;
 use OCP\IL10N;
 use OCP\IRequest;
 use OCP\Security\ICrypto;
@@ -99,8 +97,9 @@ class AccountsController extends Controller {
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 *
-	 * @return JSONResponse
+	 * @return array
 	 */
 	public function index() {
 		$mailAccounts = $this->accountService->findByUserId($this->currentUserId);
@@ -111,27 +110,23 @@ class AccountsController extends Controller {
 			$conf['aliases'] = $this->aliasesService->findAll($conf['accountId'], $this->currentUserId);
 			$json[] = $conf;
 		}
-		return new JSONResponse($json);
+		return $json;
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 *
 	 * @param int $accountId
-	 * @return JSONResponse
+	 * @return array
 	 */
 	public function show($accountId) {
-		try {
-			$account = $this->accountService->find($this->currentUserId, $accountId);
-
-			return new JSONResponse($account);
-		} catch (DoesNotExistException $e) {
-			return new JSONResponse([], 404);
-		}
+		return $this->accountService->find($this->currentUserId, $accountId);
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 *
 	 * @param int $id
 	 * @param string $accountName
@@ -148,7 +143,7 @@ class AccountsController extends Controller {
 	 * @param string $smtpUser
 	 * @param string $smtpPassword
 	 * @param bool $autoDetect
-	 * @return JSONResponse
+	 * @return array
 	 */
 	public function update($id, $accountName, $emailAddress, $password, $imapHost, $imapPort, $imapSslMode, $imapUser, $imapPassword, $smtpHost, $smtpPort, $smtpSslMode, $smtpUser, $smtpPassword, $autoDetect) {
 		$account = null;
@@ -165,37 +160,33 @@ class AccountsController extends Controller {
 
 		if (is_null($account)) {
 			if ($autoDetect) {
-				return new JSONResponse([
-					'message' => $this->l10n->t('Auto detect failed. Please use manual mode.')
-					], Http::STATUS_BAD_REQUEST);
+				throw new ClientException($this->l10n->t('Auto detect failed. Please use manual mode.'));
 			} else {
 				$this->logger->error('Updating account failed: ' . $errorMessage);
-				return new JSONResponse([
-					'message' => $this->l10n->t('Updating account failed: ') . $errorMessage
-					], Http::STATUS_BAD_REQUEST);
+				throw new ClientException($this->l10n->t('Updating account failed: ') . $errorMessage);
 			}
 		}
 
-		return new JSONResponse(['data' => ['id' => $account->getId()]], Http::STATUS_CREATED);
+		return [
+			'data' => [
+				'id' => $account->getId()
+			]
+		];
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 *
 	 * @param int $id
-	 * @return JSONResponse
 	 */
 	public function destroy($id) {
-		try {
-			$this->accountService->delete($this->currentUserId, $id);
-			return new JSONResponse();
-		} catch (DoesNotExistException $e) {
-			return new JSONResponse([], Http::STATUS_NOT_FOUND);
-		}
+		$this->accountService->delete($this->currentUserId, $id);
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 *
 	 * @param string $accountName
 	 * @param string $emailAddress
@@ -211,7 +202,7 @@ class AccountsController extends Controller {
 	 * @param string $smtpUser
 	 * @param string $smtpPassword
 	 * @param bool $autoDetect
-	 * @return JSONResponse
+	 * @return array
 	 */
 	public function create($accountName, $emailAddress, $password, $imapHost, $imapPort, $imapSslMode, $imapUser, $imapPassword, $smtpHost, $smtpPort, $smtpSslMode, $smtpUser, $smtpPassword, $autoDetect) {
 		$account = null;
@@ -228,22 +219,23 @@ class AccountsController extends Controller {
 
 		if (is_null($account)) {
 			if ($autoDetect) {
-				return new JSONResponse([
-					'message' => $this->l10n->t('Auto detect failed. Please use manual mode.')
-					], Http::STATUS_BAD_REQUEST);
+				throw new ClientException($this->l10n->t('Auto detect failed. Please use manual mode.'));
 			} else {
 				$this->logger->error('Creating account failed: ' . $errorMessage);
-				return new JSONResponse([
-					'message' => $this->l10n->t('Creating account failed: ') . $errorMessage
-					], Http::STATUS_BAD_REQUEST);
+				throw new ClientException($this->l10n->t('Creating account failed: ') . $errorMessage);
 			}
 		}
 
-		return new JSONResponse(['data' => ['id' => $account->getId()]], Http::STATUS_CREATED);
+		return [
+			'data' => [
+				'id' => $account->getId()
+			]
+		];
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 *
 	 * @param int $accountId
 	 * @param string $folderId
@@ -255,7 +247,6 @@ class AccountsController extends Controller {
 	 * @param int $draftUID
 	 * @param int $messageId
 	 * @param mixed $attachments
-	 * @return JSONResponse
 	 */
 	public function send($accountId, $folderId, $subject, $body, $to, $cc, $bcc, $draftUID, $messageId, $attachments, $aliasId) {
 		$account = $this->accountService->find($this->currentUserId, $accountId);
@@ -268,17 +259,13 @@ class AccountsController extends Controller {
 			$this->mailTransmission->sendMessage($this->currentUserId, $messageData, $repliedMessageData, $alias, $draftUID);
 		} catch (Horde_Exception $ex) {
 			$this->logger->error('Sending mail failed: ' . $ex->getMessage());
-			return new JSONResponse([
-				'message' => $ex->getMessage()
-				], Http::STATUS_INTERNAL_SERVER_ERROR
-			);
+			throw $ex;
 		}
-
-		return new JSONResponse();
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 * 
 	 * @param int $accountId
 	 * @param string $subject
@@ -287,7 +274,7 @@ class AccountsController extends Controller {
 	 * @param string $cc
 	 * @param string $bcc
 	 * @param int $uid
-	 * @return JSONResponse
+	 * @return array
 	 */
 	public function draft($accountId, $subject, $body, $to, $cc, $bcc, $uid) {
 		if (is_null($uid)) {
@@ -301,15 +288,12 @@ class AccountsController extends Controller {
 
 		try {
 			$newUID = $this->mailTransmission->saveDraft($messageData, $uid);
-			return new JSONResponse([
+			return [
 				'uid' => $newUID,
-			]);
+			];
 		} catch (ServiceException $ex) {
 			$this->logger->error('Saving draft failed: ' . $ex->getMessage());
-			return new JSONResponse([
-				'message' => $ex->getMessage()
-				], Http::STATUS_INTERNAL_SERVER_ERROR
-			);
+			throw $ex;
 		}
 	}
 

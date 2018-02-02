@@ -24,6 +24,7 @@
 namespace OCA\Mail\Controller;
 
 use OCA\Mail\Contracts\IMailManager;
+use OCA\Mail\Exception\NotImplemented;
 use OCA\Mail\IMAP\Sync\Request as SyncRequest;
 use OCA\Mail\IMAP\Sync\Response as SyncResponse;
 use OCA\Mail\Service\AccountService;
@@ -60,6 +61,8 @@ class FoldersController extends Controller {
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
+	 *
 	 * @param int $accountId
 	 * @return JSONResponse
 	 */
@@ -77,6 +80,8 @@ class FoldersController extends Controller {
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
+	 *
 	 * @param int $accountId
 	 * @param string $folderId
 	 * @param string $syncToken
@@ -95,29 +100,26 @@ class FoldersController extends Controller {
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 */
 	public function show() {
-		$response = new JSONResponse();
-		$response->setStatus(Http::STATUS_NOT_IMPLEMENTED);
-		return $response;
+		throw new NotImplemented();
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 */
 	public function update() {
-		$response = new JSONResponse();
-		$response->setStatus(Http::STATUS_NOT_IMPLEMENTED);
-		return $response;
+		throw new NotImplemented();
 	}
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 */
 	public function create() {
-		$response = new JSONResponse();
-		$response->setStatus(Http::STATUS_NOT_IMPLEMENTED);
-		return $response;
+		throw new NotImplemented();
 	}
 
 }

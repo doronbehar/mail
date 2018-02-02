@@ -22,7 +22,9 @@
 
 namespace OCA\Mail\Controller;
 
+use JsonSerializable;
 use OCA\Mail\Contracts\IAttachmentService;
+use OCA\Mail\Exception\ClientException;
 use OCA\Mail\Service\Attachment\UploadedFile;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -52,20 +54,21 @@ class LocalAttachmentsController extends Controller {
 
 	/**
 	 * @NoAdminRequired
+	 * @TrapError
 	 *
-	 * @return JSONResponse
+	 * @return JsonSerializable
 	 */
 	public function create() {
 		$file = $this->request->getUploadedFile('attachment');
 
 		if (is_null($file)) {
-			return new JSONResponse(null, Http::STATUS_BAD_REQUEST);
+			throw new ClientException('no file attached');
 		}
 
 		$uploadedFile = new UploadedFile($file);
 		$attachment = $this->attachmentService->addFile($this->userId, $uploadedFile);
 
-		return new JSONResponse($attachment, Http::STATUS_CREATED);
+		return $attachment;
 	}
 
 }
